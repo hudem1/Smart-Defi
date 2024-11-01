@@ -14,6 +14,8 @@ contract LiquidationPrediction {
     // Mapping from user address to their list of information
     mapping(address => Prediction[]) public predictions;
 
+    bool public testBool;
+
     // Event to emit when user info is added
     event PredictionAdded(
         address indexed user,
@@ -57,5 +59,15 @@ contract LiquidationPrediction {
     function getPredictions(address _user) public view returns (Prediction[] memory) {
         return predictions[_user];
     }
+
+    function setTestBool() public {
+        testBool = true;
+    }
 }
 
+
+// forge create --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 LiquidationPrediction
+// cast call 0x5FbDB2315678afecb367f032d93F642f64180aa3 "testBool()"
+// cast send --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 0x5FbDB2315678afecb367f032d93F642f64180aa3 "setTestBool()"
+
+// https://endpoint-hudem2-924-1-084bd29e-7i3yxzspbq-ew.a.run.app
