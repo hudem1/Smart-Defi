@@ -16,8 +16,9 @@ from ape.contracts.base import ContractInstance
 load_dotenv(find_dotenv())
 
 PASSPHRASE = os.environ.get("H2_AA_2_PASSPHRASE")
-# sepolia_rpc_url = os.environ.get("SEPOLIA_RPC_URL")
-local_rpc_url = os.environ.get("SEPOLIA_RPC_URL")
+sepolia_rpc_url = os.environ.get("SEPOLIA_RPC_URL")
+
+local_rpc_url = "http://127.0.0.1:8545"
 
 logging.basicConfig(level=logging.INFO)
 
@@ -83,7 +84,7 @@ def predict(agent: GizaAgent, date: np.ndarray):
     # if isinstance(date, np.ndarray):
     #     print("--- instance !! ---")
     # date = [[738818.]]
-    prediction = agent.predict(input_feed={"float_input": date}, verifiable=True, model_category="ONNX_ORION", job_size='S')
+    prediction = agent.predict(input_feed={"float_input": date}, verifiable=True, dry_run=True, model_category="ONNX_ORION", job_size='S')
     # [1 1] [48419176448 0]
     return prediction
 
@@ -119,8 +120,8 @@ def execute(model_id, version_id):
     print(f"model_input: {model_input}")
 
     contracts = {
-        # "liquidation_prediction": "0x07094ef7ec0875deead70e2c3aa23770ea5b2625",
-        "liquidation_prediction": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
+        "liquidation_prediction": "0x03228C3D322a8560ADEBE1890Ae992755e5A4A1c", # sepolia
+        # "liquidation_prediction": "0x5FbDB2315678afecb367f032d93F642f64180aa3", # local
     }
 
     print(f"passphrase: {PASSPHRASE}")
@@ -129,7 +130,7 @@ def execute(model_id, version_id):
         model_id,
         version_id,
         contracts,
-        f"ethereum:local:test", # TODO: might fuck up
+        f"ethereum:sepolia:geth",
         # f"ethereum:sepolia:{sepolia_rpc_url}",
         # "ape_account_1"
         "h2_aa_2"
@@ -157,10 +158,10 @@ def execute(model_id, version_id):
 
     print(f"predicted_liquidation_date: {predicted_liquidation_date}")
 
-    # with agent.execute() as contracts:
-    #     logger.info("Executing contract")
+    with agent.execute() as contracts:
+        logger.info("Executing contract")
 
-    #     contracts.liquidation_prediction.setTestBool()
+        contracts.liquidation_prediction.setTestBool(True)
 
         # contracts.liquidation_prediction.addPrediction(
         #     liquidity_pool,

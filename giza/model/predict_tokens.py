@@ -1,6 +1,6 @@
 from giza.datasets import DatasetsLoader
 import polars as pl
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import numpy as np
 from sklearn.preprocessing import MinMaxScaler
@@ -10,6 +10,8 @@ import tensorflow as tf
 
 import tf2onnx
 import onnxruntime as ort
+
+from giza.zkcook import mcr
 
 loader = DatasetsLoader()
 
@@ -165,15 +167,16 @@ def train_model(prices: pl.DataFrame, scaler: MinMaxScaler):
     # print("--- input shape to model ---")
     # print((sequence_length, x_train.shape[2]))
 
-    # model = create_lstm_model((sequence_length, x_train.shape[2]), y_train)
+    # model = 0
+    model = create_lstm_model((sequence_length, x_train.shape[2]), y_train)
 
-    # # Train the model
-    # model.fit(x_train, y_train, validation_data=(x_val, y_val), epochs=50, batch_size=32)
+    # Train the model
+    model.fit(x_train, y_train, validation_data=(x_val, y_val), epochs=50, batch_size=32)
 
-    # # Evaluate the model on the test set
-    # model.evaluate(x_test, y_test)
+    # Evaluate the model on the test set
+    model.evaluate(x_test, y_test)
 
-    return x_test[-1]
+    return model, x_test[-1]
 
 
 def predict_future_prices(model: Sequential, last_sequence, scaler, last_date, columns, future_days=30):
@@ -210,13 +213,13 @@ def predict_future_prices(model: Sequential, last_sequence, scaler, last_date, c
 def save_model_to_onnx(model, x_sample):
     spec = (tf.TensorSpec((None, x_sample.shape[0], x_sample.shape[1]), tf.float32, name="input"),)
 
-    output_path = "model.onnx"
+    output_path = "lstm_model.onnx"
     model_proto, external_tensor_storage = tf2onnx.convert.from_keras(model, input_signature=spec, output_path=output_path, opset=13)
 
 
 def evaluate_onnx_model(scaler, last_sequence, columns, last_date):
     # Load the ONNX model
-    sess = ort.InferenceSession("model.onnx")
+    sess = ort.InferenceSession("lstm_model.onnx")
 
     # Prepare the input data.
     # Assuming last_sequence is your input and it needs to be reshaped or processed to match the input requirements of the model.
@@ -245,16 +248,28 @@ def evaluate_onnx_model(scaler, last_sequence, columns, last_date):
     #     closed="right",
     #     eager=True # immediately converts the result to a Series instead of an expression
     # ).dt.date()
-    future_date = last_date + pl.duration(days=1)
+    print(f"last_date: {last_date}")
+    # future_date = last_date + pl.duration(days=1)
+    future_date = last_date + timedelta(days=1)
 
     # Combine the future dates with the predicted data
     predicted_df = pl.DataFrame(output, columns)
-    date_series = pl.Series("date", [future_date.dt.date()])
+    date_series = pl.Series("date", [future_date])
     predicted_df.insert_column(0, date_series)
 
     # Display the DataFrame
     print('--- predicted_df ---')
     print(predicted_df)
+
+
+def reduce_model(model, x_train, y_train, x_test, y_test):
+    model, transformer = mcr(model = model,
+                         X_train = x_train,
+                         y_train = y_train,
+                         X_eval = x_test,
+                         y_eval = y_test,
+                         eval_metric = 'rmse',
+                         transform_features = True)
 
 
 if __name__ == "__main__":
@@ -266,11 +281,11 @@ if __name__ == "__main__":
     scaler = MinMaxScaler(feature_range=(0, 1))
 
     print("--- training model ---")
-    last_data_sequence = train_model(prices, scaler)
+    model, last_data_sequence  = train_model(prices, scaler)
 
-    # print("--- last sequence ---")
-    # # print(last_data_sequence)
-    # print(len(last_data_sequence))
+    print("--- last sequence ---")
+    print(last_data_sequence)
+    print(len(last_data_sequence))
 
     # print("--- saving model as onnx ---")
     # save_model_to_onnx(model, last_data_sequence)
@@ -287,10 +302,14 @@ if __name__ == "__main__":
 
     # print("--- display predictions ---")
     # print(predictions)
-    print("--- display predictions ---")
-    evaluate_onnx_model(
-        scaler,
-        last_data_sequence,
-        prices.columns[1:],
-        prices.select(pl.col('date').last()).item()
-    )
+
+    # print("--- display predictions ---")
+    # evaluate_onnx_model(
+    #     scaler,
+    #     last_data_sequence,
+    #     prices.columns[1:],
+    #     prices.select(pl.col('date').last()).item()
+    # )
+
+    # print("--- mcr ---")
+    # reduce_model(model, x_train, y_train, x_test, y_test)

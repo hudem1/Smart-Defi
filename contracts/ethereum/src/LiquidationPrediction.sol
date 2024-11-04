@@ -60,8 +60,8 @@ contract LiquidationPrediction {
         return predictions[_user];
     }
 
-    function setTestBool() public {
-        testBool = true;
+    function setTestBool(bool value) public {
+        testBool = value;
     }
 }
 
