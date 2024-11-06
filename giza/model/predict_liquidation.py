@@ -2,30 +2,14 @@ from giza.datasets import DatasetsLoader
 import polars as pl
 from datetime import datetime, timedelta
 
+from sklearn.metrics import root_mean_squared_error
+
+import xgboost as xgb
+from sklearn.model_selection import train_test_split
+
 from common_data_prepocessing import common_preprocess
 
 loader = DatasetsLoader()
-
-def add_lagged_prices(liquidations: pl.DataFrame, prices: pl.DataFrame, token_column: str):
-    # Create a temporary column in prices that matches the token_column in liquidations
-    token_price = pl.col(f"price_{token_column}").alias("price")
-    # Join prices to liquidations on date criteria
-    result = (liquidations
-              .join(
-                  prices.with_columns(token_price),
-                  left_on="day",
-                  right_on=pl.col("date"),
-                  how="left"
-              )
-              .sort(["day", "date"])
-              .with_columns([
-                  # Create lagged features for 30 days before the liquidation date
-                  [pl.col("price").shift(i).alias(f"{token_column}_t_{i}") for i in range(1, 31)]
-              ])
-              .filter(pl.col("date") == pl.col("day"))  # Ensure we're aligning to the liquidation day
-              .drop("date", "price")  # Clean up unnecessary columns
-            )
-    return result
 
 
 # This function fetches the last 30 days' prices for a given token and day
@@ -41,7 +25,7 @@ def get_historical_prices(prices: pl.DataFrame, current_day: pl.Date, token_col:
     return price_data
 
 
-def preprocess_data():
+def preprocess_data_old():
     prices, liquidations = common_preprocess()
 
     # # Process date
@@ -63,8 +47,8 @@ def preprocess_data():
         # row = pl.DataFrame([row], schema=liquidations.schema)
         day, token_col, token_debt = row[0], row[1], row[2]
         historical_prices = get_historical_prices(prices, day, token_col, token_debt)
-        print(row)
-        print(historical_prices)
+        # print(row)
+        # print(historical_prices)
         row = pl.DataFrame([row], schema=liquidations.schema)
 
         # Create new columns for each price day
@@ -95,6 +79,7 @@ def preprocess_data():
 
     # Create a dictionary with consistent encoding
     token_mapping = {token: idx for idx, token in enumerate(unique_tokens)}
+    # {'DAI': 0, 'WETH': 1, 'WBTC': 2, 'USDC': 3, 'USDT': 4}
 
     # Display the mapping
     print("Token Mapping:", token_mapping)
@@ -105,3 +90,253 @@ def preprocess_data():
         lagged_liquidations["token_col"].map_elements(lambda x: token_mapping[x]).alias("token_col"),
         lagged_liquidations["token_debt"].map_elements(lambda x: token_mapping[x]).alias("token_debt")
     ])
+
+    # Calculate the price of one unit of collateral and debt
+    lagged_liquidations = lagged_liquidations.with_columns([
+        (pl.col("col_value_USD") / pl.col("collateral_amount")).alias("token_col_t"),
+        (pl.col("debt_value_USD") / pl.col("debt_amount")).alias("token_debt_t"),
+    ])
+
+    # Calculate the debt-to-collateral ratio
+    lagged_liquidations = lagged_liquidations.with_columns(
+        (pl.col("debt_value_USD") / pl.col("col_value_USD")).alias("debt_to_collateral_ratio")
+    )
+
+# test = liquidations.with_columns(
+#     (pl.col("debt_value_USD") / pl.col("col_value_USD")).alias("debt_to_collateral_ratio")
+# )
+# ratios_per_pair = test.group_by(['token_col', 'token_debt']).agg(
+#     pl.col('debt_to_collateral_ratio')
+# )
+
+# ratios_per_pair.with_columns(
+#     pl.col("debt_to_collateral_ratio").arr.eval(pl.element().mean(), dtype_out=pl.Float64).alias("ratio_mean")
+#     # pl.col('debt_to_collateral_ratio').ar.mean().alias('ratio mean')
+# )
+
+    # Drop the columns col_value_USD and debt_value_USD
+    # lagged_liquidations = lagged_liquidations.drop(["col_value_USD", "debt_value_USD"])
+    # lagged_liquidations = lagged_liquidations.with_columns([
+    #     (pl.col("token_col_t") * pl.col("collateral_amount")).alias("col_value_USD"),
+    #     (pl.col("token_debt_t") * pl.col("debt_amount")).alias("debt_value_USD"),
+    # ])
+
+    return lagged_liquidations
+
+
+def preprocess_data():
+    prices, liquidations = common_preprocess()
+
+    # # Process date
+    # liquidations = liquidations.with_column(
+    #     pl.col("day").str.strptime(pl.Date).cast(pl.Int32).alias("day_ordinal")
+    # )
+
+    # # Encode categorical data
+    # liquidations = liquidations.with_columns([
+    #     pl.col("token_col").cast(pl.Categorical).cast(pl.Int32).alias("token_col"),
+    #     pl.col("token_debt").cast(pl.Categorical).cast(pl.Int32).alias("token_debt")
+    # ])
+
+    # Initialize a list to collect the enhanced data frames
+    results = []
+    # Iterate over each row in the liquidations DataFrame
+    for row in liquidations.rows():
+        # Fetch prices for token_col and token_debt
+        # row = pl.DataFrame([row], schema=liquidations.schema)
+        day, token_col, token_debt, collateral_amount, _, debt_amount = row[0], row[1], row[2], row[3], row[4], row[5]
+        historical_prices = get_historical_prices(prices, day, token_col, token_debt)
+        # print(row)
+        # print(historical_prices)
+        row = pl.DataFrame([row], schema=liquidations.schema)
+
+        row = row.with_columns(
+            (pl.col("debt_value_USD") / pl.col("col_value_USD")).alias("debt_to_collat_ratio")
+        )
+
+        row = row.drop(['debt_value_USD', 'col_value_USD', 'debt_amount', 'collateral_amount'])
+
+        # Create new columns for each price day
+        for i in range(30):
+            price_token_col, price_token_debt = historical_prices.select("price_" + token_col, "price_" + token_debt)[i]
+
+            debt_to_collat_ratio = (price_token_debt * debt_amount) / (price_token_col * collateral_amount)
+            row = row.with_columns(pl.lit(debt_to_collat_ratio).alias(f"debt_to_collat_ratio_t_{i+1}"))
+
+        # Append the row with new data to results
+        results.append(row)
+
+    # Convert results back to DataFrame
+    lagged_liquidations: pl.DataFrame = pl.concat(results)
+
+    lagged_liquidations = lagged_liquidations.with_columns([
+        lagged_liquidations["day"].cast(pl.Int32).alias("day"),
+        # Columns treated independently:
+        # lagged_liquidations["token_col"].cast(pl.Categorical).cast(pl.UInt32).alias("token_col"),
+        # lagged_liquidations["token_debt"].cast(pl.Categorical).cast(pl.UInt32).alias("token_debt")
+    ])
+
+    lagged_liquidations = categorical_encoding(lagged_liquidations)
+
+# test = liquidations.with_columns(
+#     (pl.col("debt_value_USD") / pl.col("col_value_USD")).alias("debt_to_collateral_ratio")
+# )
+# ratios_per_pair = test.group_by(['token_col', 'token_debt']).agg(
+#     pl.col('debt_to_collateral_ratio')
+# )
+
+# ratios_per_pair.with_columns(
+#     pl.col("debt_to_collateral_ratio").arr.eval(pl.element().mean(), dtype_out=pl.Float64).alias("ratio_mean")
+#     # pl.col('debt_to_collateral_ratio').ar.mean().alias('ratio mean')
+# )
+
+    # Drop the columns col_value_USD and debt_value_USD
+    # lagged_liquidations = lagged_liquidations.drop(["col_value_USD", "debt_value_USD"])
+    # lagged_liquidations = lagged_liquidations.with_columns([
+    #     (pl.col("token_col_t") * pl.col("collateral_amount")).alias("col_value_USD"),
+    #     (pl.col("token_debt_t") * pl.col("debt_amount")).alias("debt_value_USD"),
+    # ])
+
+
+    # Add a column to have the first most recent day where the ratio is superior to the liquidation ratio
+    # test = lagged_liquidations.with_columns(
+    #     pl.struct([f"debt_to_collat_ratio_t_{i}" for i in range(1, 31)] + ['debt_to_collat_ratio']).alias("ratios").map_elements(find_start_of_borrow).alias("start_of_borrow")
+    # )
+
+    ratio_columns = [f"debt_to_collat_ratio_t_{i}" for i in range(1, 31)]  # Adjust according to your actual range
+
+    # Maybe a better approach would be to set to None all later values AS SOON AS we encounter
+    lagged_liquidations = lagged_liquidations.with_columns([
+        pl.when(pl.col(col) > pl.col("debt_to_collat_ratio"))
+        .then(None)
+        .otherwise(pl.col(col))
+        .alias(col) for col in ratio_columns
+    ])
+
+    # grouped_df = lagged_liquidations.group_by(['token_col', 'token_debt']).agg([
+    #     pl.col('debt_to_collat_ratio').list().alias('ratios')
+    # ])
+
+    # lagged_liquidations.group_by(['token_col', 'token_debt']).map_groups(split_group)
+
+    return lagged_liquidations
+
+
+def categorical_encoding(lagged_liquidations):
+    # Find unique tokens in both columns
+    unique_token_symbols = pl.concat([
+        pl.col('token_col'),
+        pl.col('token_debt'),
+    ]).alias('token').unique()
+    unique_tokens = lagged_liquidations.select(unique_token_symbols).to_series()
+
+    # Create a dictionary with consistent encoding
+    token_mapping = {token: idx for idx, token in enumerate(unique_tokens)}
+    # {'DAI': 0, 'WETH': 1, 'WBTC': 2, 'USDC': 3, 'USDT': 4}
+
+    # Display the mapping
+    print("Token Mapping:", token_mapping)
+
+    lagged_liquidations = lagged_liquidations.with_columns([
+        # lagged_liquidations["token_col"].replace(lambda x: token_mapping[x]),
+        # lagged_liquidations["token_debt"].replace(token_mapping),
+        lagged_liquidations["token_col"].map_elements(lambda x: token_mapping[x]).alias("token_col"),
+        lagged_liquidations["token_debt"].map_elements(lambda x: token_mapping[x]).alias("token_debt")
+    ])
+
+    return lagged_liquidations
+
+
+def one_hot_encoding(lagged_liquidations):
+        # Find unique tokens in both columns
+    unique_token_symbols = pl.concat([
+        pl.col('token_col'),
+        pl.col('token_debt'),
+    ]).alias('token').unique()
+    unique_tokens = lagged_liquidations.select(unique_token_symbols).to_series()
+
+    for token in unique_tokens:
+        lagged_liquidations = lagged_liquidations.with_columns([
+            (pl.col('token_col') == token).cast(pl.UInt8).alias(f"{token}_col"),
+            (pl.col('token_debt') == token).cast(pl.UInt8).alias(f"{token}_debt")
+        ])
+
+    # lagged_liquidations = lagged_liquidations.drop(["token_col", "token_debt"])
+
+    return lagged_liquidations
+
+
+# Find the first earlier day where the debt-to-collateral ratio was greater
+def find_start_of_borrow(row):
+    liquidation_ratio = row['debt_to_collat_ratio']
+
+    for i in range(1, 31):
+        day_ratio = row[f'debt_to_collat_ratio_t_{i}']
+
+        if day_ratio > liquidation_ratio:
+            return f't-{i}'
+
+    return None  # Return None if no previous day's ratio is higher
+
+
+def split_data(lagged_liquidations: pl.DataFrame):
+    lagged_liquidations = lagged_liquidations.with_columns([
+        pl.col("day").sort().over(["token_col", "token_debt"]),  # Ensure data is sorted by date within each group if needed
+        pl.count().over(["token_col", "token_debt"]).alias("group_size"),
+        pl.arange(0, pl.count()).over(["token_col", "token_debt"]).alias("row_index")
+        # pl.cumcount.over(["token_col", "token_debt"]).alias("row_number")
+    ])
+
+    train_liquidations = lagged_liquidations.filter(pl.col("row_index") < (pl.col("group_size") * 0.8))
+    test_liquidations = lagged_liquidations.filter(pl.col("row_index") >= (pl.col("group_size") * 0.8))
+
+    X_train = train_liquidations.drop(["group_size", "row_index", "day", "debt_to_collat_ratio"])
+    y_train = train_liquidations.select(["day", "debt_to_collat_ratio"])
+
+    X_test = test_liquidations.drop(["group_size", "row_index", "day", "debt_to_collat_ratio"])
+    y_test = test_liquidations.select(["day", "debt_to_collat_ratio"])
+
+    return X_train, y_train, X_test, y_test
+
+
+def train_model(X_train: pl.DataFrame, y_train: pl.DataFrame):
+    # X = liquidations.drop(['day', 'debt_to_collat_ratio'])
+    # y = liquidations.select(['day', 'debt_to_collat_ratio'])
+
+    # Split the data into training and testing sets
+    # X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+    # Setup and train the XGBoost model
+    model = xgb.XGBRegressor(objective='reg:squarederror', n_estimators=100, learning_rate=0.1, max_depth=3)
+    model.fit(X_train.to_numpy(), y_train.to_numpy())
+
+    return model
+
+
+def evaluate_model(model, X_test: pl.DataFrame, y_test: pl.DataFrame):
+    # Predict and evaluate
+    predictions = model.predict(X_test.to_numpy())
+    mse = root_mean_squared_error(y_test.to_numpy(), predictions)
+
+    print(f"Mean Squared Error: {mse}")
+
+
+if __name__ == "__main__":
+    liquidations = preprocess_data()
+
+    X_train, y_train, X_test, y_test = split_data(liquidations)
+
+    model = train_model(X_train, y_train)
+
+    evaluate_model(model, X_test, y_test)
+
+
+# Scalers:
+
+#   - token_col_t_i --> minmax
+#   - token_debt_t_i --> minmax
+
+#   - collateral_amount
+#   - debt_amount
+
+#   - col_value_USD & debt_value_USD
