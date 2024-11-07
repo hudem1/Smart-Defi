@@ -2,7 +2,6 @@ from giza.datasets import DatasetsLoader
 import polars as pl
 from datetime import datetime, timedelta
 
-
 loader = DatasetsLoader()
 
 def common_preprocess():

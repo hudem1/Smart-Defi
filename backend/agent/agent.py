@@ -6,6 +6,8 @@ import pprint
 
 from logging import getLogger
 
+import polars as pl
+
 import numpy as np
 from dotenv import find_dotenv, load_dotenv
 from giza.agents import AgentResult, GizaAgent
@@ -13,43 +15,68 @@ from giza.agents import AgentResult, GizaAgent
 # from addresses import ADDRESSES
 from ape.contracts.base import ContractInstance
 
+from app import model, last_data_sequence, scaler, last_date, columns
+
+from model.predict_tokens import predict_future_prices
+
 load_dotenv(find_dotenv())
 
 PASSPHRASE = os.environ.get("H2_AA_2_PASSPHRASE")
 sepolia_rpc_url = os.environ.get("SEPOLIA_RPC_URL")
-
 local_rpc_url = "http://127.0.0.1:8545"
 
 logging.basicConfig(level=logging.INFO)
 
+def get_data(debt_token, collat_token):
+    print("--- get token prices predictions ---")
+    predictions = predict_future_prices(
+        model,
+        last_data_sequence,
+        scaler,
+        last_date,
+        columns,
+        30
+    )
 
-min_val_x = 738886.0
-max_val_x = 738985.0
+    print(predictions)
 
-min_val_y = 738916.0
-max_val_y = 739015.0
+    predictions = predictions.select(["date", f"PRICE_{debt_token}", f"PRICE_{collat_token}"])
 
-def get_data():
-    # TODO
-    # hardcoding the values for now
-
-    liquidity_pool = ''
-    debt_token = ''
-    debt_token_amount = 200
-    collat_token = ''
-    collat_token_amount = 200
-
-    return liquidity_pool, debt_token, debt_token_amount, collat_token, collat_token_amount, '2025-03-16'
+    return predictions
 
 
+def process_data(token_predictions, debt_token, debt_token_amount, collat_token, collat_token_amount):
+    # schema = ["token_col", "token_debt"] + [f"debt_to_collat_ratio_t_{i + 1}" for i in range(30)]
+    # input_data = pl.DataFrame(None, schema=schema)
 
-def process_data(date):
-    ordinal_date = datetime.strptime(date, '%Y-%m-%d').toordinal()
+    token_mapping = {'DAI': 0, 'WETH': 1, 'WBTC': 2, 'USDC': 3, 'USDT': 4}
 
-    scaled_input = (ordinal_date - min_val_x) / (max_val_x - min_val_x)
+    new_row = {
+        "token_col": token_mapping[collat_token],
+        "token_debt": token_mapping[debt_token],
+    }
 
-    return np.array([[scaled_input]], dtype=np.float32)
-    # return np.array([[ordinal_date]]).astype(np.float32)
+    # Calculate debt-to-collateral ratios for each prediction
+    for i in range(len(token_predictions)):
+        price_debt = token_predictions[f"price_{debt_token}"][i]
+        price_collat = token_predictions[f"price_{collat_token}"][i]
+
+        # Calculate the debt-to-collateral ratio
+        debt_to_collat_ratio = (price_debt * debt_token_amount) / (price_collat * collat_token_amount)
+
+        # Add the calculated ratio to the new row
+        new_row[f"debt_to_collat_ratio_t_{i + 1}"] = debt_to_collat_ratio
+
+    input_data = pl.DataFrame(new_row)
+    # debt_to_collat_ratio = (
+    #     (pl.col(f"price_{debt_token}") * debt_token_amount) /
+    #     (pl.col(f"price_{collat_token}") * collat_token_amount)
+    # )
+
+    # for i in range(30):
+    #     new_row[f"debt_to_collat_ratio_t_{i+1}"] = debt_to_collat_ratio[i]
+
+    return input_data.to_numpy()
 
 
 
@@ -70,7 +97,7 @@ def create_agent(
     return agent
 
 
-def predict(agent: GizaAgent, date: np.ndarray):
+def predict(agent: GizaAgent, input: np.ndarray):
     """
     Predict the expected liquidation date
 
@@ -80,11 +107,11 @@ def predict(agent: GizaAgent, date: np.ndarray):
     Returns:
         int: Predicted value.
     """
-    print(f"date: {date}") # [738818]
+    print(f"--- model input: {input}") # [738818]
     # if isinstance(date, np.ndarray):
     #     print("--- instance !! ---")
     # date = [[738818.]]
-    prediction = agent.predict(input_feed={"float_input": date}, verifiable=True, dry_run=True, model_category="ONNX_ORION", job_size='S')
+    prediction = agent.predict(input_feed={"float_input": input}, verifiable=True, dry_run=True, model_category="ONNX_ORION", job_size='S')
     # [1 1] [48419176448 0]
     return prediction
 
@@ -111,13 +138,14 @@ def postprocess_data(scaled_ordinal):
 
 
 
-def execute(model_id, version_id):
+def execute_agent(model_id, version_id, debt_token, debt_token_amount, collat_token, collat_token_amount):
     logger = getLogger("agent_logger")
 
-    liquidity_pool, debt_token, debt_token_amount, collat_token, collat_token_amount, date = get_data()
-    model_input = process_data(date)
+    token_predictions = get_data(debt_token, collat_token)
 
-    print(f"model_input: {model_input}")
+    predicted_debt_to_collat_ratios = process_data(token_predictions, debt_token, debt_token_amount, collat_token, collat_token_amount)
+
+    print(f"model_input: {predicted_debt_to_collat_ratios}")
 
     contracts = {
         "liquidation_prediction": "0x03228C3D322a8560ADEBE1890Ae992755e5A4A1c", # sepolia
@@ -148,7 +176,7 @@ def execute(model_id, version_id):
     print(agent.framework) # CAIRO
     print(agent.session) # None
 
-    prediction = predict(agent, model_input)
+    prediction = predict(agent, predicted_debt_to_collat_ratios)
 
     print(f"prediction: {prediction}")
 
@@ -173,6 +201,7 @@ def execute(model_id, version_id):
 
 
 
+
 if __name__ == "__main__":
     # Create the parser
     parser = argparse.ArgumentParser()
@@ -184,22 +213,11 @@ if __name__ == "__main__":
     # Parse arguments
     args = parser.parse_args()
 
-    MODEL_ID = args.model_id
-    VERSION_ID = args.version_id
+    MODEL_ID = args.model_id or 924
+    VERSION_ID = args.version_id or 10
 
     print(f"modelid: {MODEL_ID}")
     print(f"versionid: {VERSION_ID}")
 
-    execute(MODEL_ID, VERSION_ID)
+    execute_agent(MODEL_ID, VERSION_ID)
 
-
-
-
-# curl -X POST https://endpoint-hudem2-924-1-084bd29e-7i3yxzspbq-ew.a.run.app/cairo_run \
-#      -H "Content-Type: application/json" \
-#      -d '{
-#            "args": "[\"2\", \"2\", \"2\", \"4\", \"1\", \"2\", \"3\", \"4\"]"
-#          }'
-# - check curl max u32
-# - check doc -> transpile to cairo if float with u64
-# - check if can generate an onnx with bigger than floattensortype
