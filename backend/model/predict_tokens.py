@@ -181,13 +181,15 @@ def reduce_model(model, x_train, y_train, x_test, y_test):
                          transform_features = True)
 
 
+
+
 model = None
 last_data_sequence = None
 scaler = None
 last_date = None
 columns = None
 
-def prepare_data_for_predictions():
+def initialize_data_for_predictions():
     global model, last_data_sequence, scaler, last_date, columns
     print("--- preprocess_data ---")
     prices, _ = common_preprocess()

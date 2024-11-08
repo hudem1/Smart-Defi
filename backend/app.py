@@ -3,22 +3,10 @@ from pydantic import BaseModel
 import uvicorn
 
 import numpy as np
-import polars as pl
 
-from sklearn.preprocessing import MinMaxScaler
-from tensorflow.keras.models import Sequential, load_model
-
-from model.common_data_prepocessing import common_preprocess
-from model.predict_tokens import create_sequences, split_data
 from agent.agent import execute_agent
-
-
-# Global variables to hold the data for model prediction
-model = None
-last_data_sequence = None
-scaler = None
-last_date = None
-columns = None
+from model.predict_tokens import initialize_data_for_predictions
+# from globals import model, last_data_sequence, scaler, last_date, columns
 
 app = FastAPI()
 
@@ -34,30 +22,7 @@ class PredictionRequest(BaseModel):
 
 @app.on_event("startup")
 async def prepare_data_for_predictions():
-    global model, last_data_sequence, scaler, last_date, columns
-    print("--- preprocess_data ---")
-    prices, _ = common_preprocess()
-
-    print(prices)
-
-    scaler = MinMaxScaler(feature_range=(0, 1))
-
-    print("--- training model ---")
-    # Normalize the data
-    scaled_prices = scaler.fit_transform(prices[:, 1:].to_numpy()) # first column is date
-
-    # Prepare the sequences
-    sequence_length = 30
-    x, y = create_sequences(scaled_prices, sequence_length)
-
-    x_train, y_train, x_val, y_val, x_test, y_test = split_data(x, y)
-    last_data_sequence = x_test[-1]
-
-    last_date = prices.select(pl.col('date').last()).item()
-
-    columns = prices.columns[1:] # without the date
-
-    model = load_model('token_prices.keras')
+    initialize_data_for_predictions()
 
 
 @app.get("/api/py/helloFastApi")
@@ -66,16 +31,19 @@ def hello_fast_api():
 
 
 @app.get("/predict")
-def predict_prices():
-    model_id = 111
-    version_id = 11
+async def predict_prices():
+    # model_id = 926
+    # version_id = 2
 
-    debt_token = None
-    debt_token_amount = None
-    collat_token = None
-    collat_token_amount = None
+    debt_token = 'USDC'
+    debt_token_amount = 2175 # 2618 * 0.83 / 0.999122 = 2174.84951788 --> 2024-03-05 (29jrs apres)
+    # debt_token_amount = 2180.41 # 2627 * 0.83 = 2180.41 --> 2024-03-04 (28jrs apres)
+    collat_token = 'WETH'
+    collat_token_amount = 1
 
-    execute_agent(model_id, version_id, debt_token, debt_token_amount, collat_token, collat_token_amount)
+    execute_agent(debt_token, debt_token_amount, collat_token, collat_token_amount)
+
+    return {"message": "Everything's good!"}
 
 
 @app.post("/predict/temp")

@@ -2,11 +2,20 @@
 pragma solidity ^0.8.0;
 
 contract LiquidationPrediction {
+    enum Token {
+        DAI,
+        WETH,
+        WBTC,
+        USDC,
+        USDT
+    }
+    // token_mapping = {'DAI': 0, 'WETH': 1, 'WBTC': 2, 'USDC': 3, 'USDT': 4}
+
     struct Prediction {
-        address liquidityPool;
-        address debtToken;
+        // address liquidityPool;
+        Token debtToken;
         uint256 debtTokenAmount;
-        address collatToken;
+        Token collatToken;
         uint256 collatTokenAmount;
         uint256 predictedLiquidationDate;  // stored as a timestamp
     }
@@ -17,27 +26,27 @@ contract LiquidationPrediction {
     bool public testBool;
 
     // Event to emit when user info is added
+    // address indexed liquidityPool,
     event PredictionAdded(
         address indexed user,
-        address indexed liquidityPool,
-        address debtToken,
+        Token indexed debtToken,
         uint256 debtTokenAmount,
-        address collatToken,
+        Token indexed collatToken,
         uint256 collatTokenAmount,
         uint256 predictedLiquidationDate
     );
 
     function addPrediction(
-        address _liquidityPool,
-        address _debtToken,
+        // address _liquidityPool,
+        Token _debtToken,
         uint256 _debtTokenAmount,
-        address _collatToken,
+        Token _collatToken,
         uint256 _collatTokenAmount,
         uint256 _predictedLiquidationDate
     ) public {
         // Add the prediction to the user's list in the mapping
         predictions[msg.sender].push(Prediction(
-            _liquidityPool,
+            // _liquidityPool,
             _debtToken,
             _debtTokenAmount,
             _collatToken,
@@ -47,7 +56,7 @@ contract LiquidationPrediction {
 
         emit PredictionAdded(
             msg.sender,
-            _liquidityPool,
+            // _liquidityPool,
             _debtToken,
             _debtTokenAmount,
             _collatToken,

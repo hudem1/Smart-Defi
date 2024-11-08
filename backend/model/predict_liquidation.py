@@ -2,15 +2,15 @@ from giza.datasets import DatasetsLoader
 import polars as pl
 from datetime import datetime, timedelta
 
-from sklearn.metrics import root_mean_squared_error
+from sklearn.metrics import root_mean_squared_error, mean_absolute_error, mean_squared_error
 
 import numpy as np
 import xgboost as xgb
 from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LinearRegression
+from common_data_prepocessing import common_preprocess
 
-from backend.model.common_data_prepocessing import common_preprocess
-
-from giza.zkcook import mcr
+from giza.zkcook import mcr, serialize_model
 
 loader = DatasetsLoader()
 
@@ -193,12 +193,12 @@ def preprocess_data():
     ratio_columns = [f"debt_to_collat_ratio_t_{i}" for i in range(1, 31)]  # Adjust according to your actual range
 
     # Maybe a better approach would be to set to None all later values AS SOON AS we encounter
-    lagged_liquidations = lagged_liquidations.with_columns([
-        pl.when(pl.col(col) > pl.col("debt_to_collat_ratio"))
-        .then(None)
-        .otherwise(pl.col(col))
-        .alias(col) for col in ratio_columns
-    ])
+    # lagged_liquidations = lagged_liquidations.with_columns([
+    #     pl.when(pl.col(col) > pl.col("debt_to_collat_ratio"))
+    #     .then(None)
+    #     .otherwise(pl.col(col))
+    #     .alias(col) for col in ratio_columns
+    # ])
 
     # grouped_df = lagged_liquidations.group_by(['token_col', 'token_debt']).agg([
     #     pl.col('debt_to_collat_ratio').list().alias('ratios')
@@ -314,6 +314,9 @@ def simplify_model(model, X_train, y_train, X_test, y_test):
 def evaluate_model(model, X_test: np.ndarray, y_test: np.ndarray):
     # Predict and evaluate
     predictions = model.predict(X_test)
+    print(f"-- predictions: {predictions}")
+
+    # mse = mean_squared_error(y_test, predictions)
     mse = root_mean_squared_error(y_test, predictions)
 
     print(f"Mean Squared Error: {mse}")
@@ -329,8 +332,17 @@ if __name__ == "__main__":
 
     evaluate_model(model, X_test, y_test)
 
-    # model, transformer = simplify_model(model, X_train, y_train, X_test, y_test)
-    # evaluate_model(model, transformer.transform(X_test), y_test)
+    print(model.get_params())
+
+    model, transformer = simplify_model(model, X_train, y_train, X_test, y_test)
+    evaluate_model(model, transformer.transform(X_test), y_test)
+
+    print(model.get_params())
+
+    # model.save("token_prices.keras")
+    # model.save("pred_liquid_mod.h5")
+
+    serialize_model(model, "predict_liquidations_model.json")
 
 
 # Scalers:
