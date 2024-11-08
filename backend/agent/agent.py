@@ -189,7 +189,7 @@ def execute_agent(debt_token, debt_token_amount, collat_token, collat_token_amou
         # "liquidation_prediction": "0x5FbDB2315678afecb367f032d93F642f64180aa3", # local
     }
 
-    print(f"passphrase: {PASSPHRASE}")
+    # print(f"passphrase: {PASSPHRASE}")
 
     agent = create_agent(
         117,
@@ -199,17 +199,17 @@ def execute_agent(debt_token, debt_token_amount, collat_token, collat_token_amou
         "h2_aa_3"
     )
 
-    print(agent.version)
-    print(agent.account) # h2_aa_3
-    print(agent.api_client.url) # https://api.gizatech.xyz/api/v1
-    print(agent.api_client.api_key) # None
-    print(agent.chain) # ethereum:local:test
-    print(agent.uri) # https://endpoint-hudem2-924-1-084bd29e-7i3yxzspbq-ew.a.run.app/cairo_run
-    print(agent.contract_handler)
-    print(agent.endpoints_client)
-    print(agent.endpoint_id) # 453
-    print(agent.framework) # CAIRO
-    print(agent.session) # None
+    # print(agent.version)
+    # print(agent.account) # h2_aa_3
+    # print(agent.api_client.url) # https://api.gizatech.xyz/api/v1
+    # print(agent.api_client.api_key) # None
+    # print(agent.chain) # ethereum:local:test
+    # print(agent.uri) # https://endpoint-hudem2-924-1-084bd29e-7i3yxzspbq-ew.a.run.app/cairo_run
+    # print(agent.contract_handler)
+    # print(agent.endpoints_client)
+    # print(agent.endpoint_id) # 453
+    # print(agent.framework) # CAIRO
+    # print(agent.session) # None
 
     prediction = predict_liquidation(agent, predicted_debt_to_collat_ratios.to_numpy().flatten())
 
@@ -244,6 +244,8 @@ def execute_agent(debt_token, debt_token_amount, collat_token, collat_token_amou
             print("--- Error ---")
             print(f"Error Type: {type(e).__name__}")  # Get the type of the exception
             print(f"Error Message: {str(e)}")  # Get the message of the exception
+
+    return datetime.fromordinal(predicted_date).strftime("%Y-%m-%d")
 
 
 

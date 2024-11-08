@@ -123,8 +123,6 @@ def execute(model_id, version_id):
         # "liquidation_prediction": "0x5FbDB2315678afecb367f032d93F642f64180aa3", # local
     }
 
-    print(f"passphrase: {PASSPHRASE}")
-
     agent = create_agent(
         model_id,
         version_id,
