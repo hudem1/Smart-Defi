@@ -266,10 +266,11 @@ async def execute_agent(debt_token, debt_token_amount, collat_token, collat_toke
 
     # await sn_account.client.call_contract(call)
 
-    invocation = await sn_contract.functions["set_test_bool"].invoke_v1(
-        value=True, max_fee=int(1e14)
-    )
-    await invocation.wait_for_acceptance()
+    ### just a test function ###
+    # invocation = await sn_contract.functions["set_test_bool"].invoke_v1(
+    #     value=True, max_fee=int(1e14)
+    # )
+    # await invocation.wait_for_acceptance()
 
     ##### With agent interacting with Ethereum smart contract #####
     # with agent.execute() as contracts:

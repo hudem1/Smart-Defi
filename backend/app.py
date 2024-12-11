@@ -2,11 +2,10 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 import uvicorn
 
-import numpy as np
-
 from agent.agent import execute_agent
-from model.predict_tokens import initialize_data_for_predictions
+from model.predict_tokens import initialize_data_for_predictions, predict_future_prices
 from fastapi.middleware.cors import CORSMiddleware
+from model import predict_tokens
 
 app = FastAPI()
 
@@ -38,13 +37,24 @@ async def prepare_data_for_predictions():
     initialize_data_for_predictions()
 
 
-@app.get("/api/py/helloFastApi")
-def hello_fast_api():
-    return {"message": "Hello from FastAPI hihihaha"}
+@app.get("/predict_token_prices")
+async def predict_token_prices():
+    predictions = predict_future_prices(
+        predict_tokens.model,
+        predict_tokens.last_data_sequence,
+        predict_tokens.scaler,
+        predict_tokens.last_date,
+        predict_tokens.columns,
+        90
+    )
+
+    predictions = predictions.select(["date", "price_DAI", "price_WETH", "price_WBTC", "price_USDC", "price_USDT"])
+
+    return predictions.to_dicts()
 
 
-@app.post("/predict_liquidation")
-async def predict_prices(data: PredictionRequest):
+@app.post("/predict_liquidation_date")
+async def predict_liquidation(data: PredictionRequest):
     # model_id = 926
     # version_id = 2
 
@@ -68,28 +78,6 @@ async def predict_prices(data: PredictionRequest):
         "collateralAmount": data.collateralAmount,
         "predictedLiquidationDate": predictedLiquidationDate
     }
-
-
-# @app.post("/predict/temp")
-# async def predict(data: PredictionRequest):
-#     global scaler  # Use the scaler from the global scope
-
-#     # Convert input data into the format required by your model
-#     input_data = np.array([
-#         data.collateral_amount,
-#         data.col_value_USD,
-#         data.debt_amount,
-#         data.debt_amount_USD,
-#         # Include additional features as needed
-#     ]).reshape(1, -1)
-
-#     # Scale the input data
-#     scaled_input = scaler.transform(input_data)
-
-#     # Make prediction
-#     prediction = model.predict(scaled_input)
-
-#     return {"prediction": prediction.tolist()}
 
 
 if __name__ == "__main__":

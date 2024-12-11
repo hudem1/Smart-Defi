@@ -1,7 +1,7 @@
 "use client";
 
 import { Dispatch, SetStateAction, useState } from 'react';
-import { fetchPrediction } from '../api/api';
+import { fetchLiquidationDatePrediction } from '../api/api';
 import { Prediction } from './displayPredictions';
 
 const tokens = ['WETH', 'WBTC', 'USDC', 'USDT', 'DAI'] as const;
@@ -39,13 +39,13 @@ const BorrowForm = (props: PredictLiquidationFormPros) => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    const predictionPromise = fetchPrediction(formData);
+    const predictionPromise = fetchLiquidationDatePrediction(formData);
 
     props.setIsLoading({ status: true, message: 'Predicting token prices...' });
-    await new Promise((resolve) => setTimeout(resolve, 4000));
+    await new Promise((resolve) => setTimeout(resolve, 3000));
 
     props.setIsLoading({ status: true, message: 'Predicting liquidation date...' });
-    await new Promise((resolve) => setTimeout(resolve, 11000));
+    await new Promise((resolve) => setTimeout(resolve, 5000));
 
     // await new Promise((resolve) => setTimeout(resolve, 10000));
     // props.setIsLoading({ status: true, message: 'Generating model proof...' });
@@ -54,7 +54,7 @@ const BorrowForm = (props: PredictLiquidationFormPros) => {
     // props.setIsLoading({ status: true, message: 'Verifying model proof...' });
 
     props.setIsLoading({ status: true, message: 'Updating smart contract...' });
-    await new Promise((resolve) => setTimeout(resolve, 10000));
+    // await new Promise((resolve) => setTimeout(resolve, 2000));
 
     try {
         const prediction = await predictionPromise;
