@@ -15,8 +15,6 @@ from giza.zkcook import mcr
 
 from .common_data_prepocessing import common_preprocess
 
-# from temp import last_scaled_sequence
-
 loader = DatasetsLoader()
 
 
@@ -73,10 +71,6 @@ def train_model(prices: pl.DataFrame, scaler: MinMaxScaler):
 
     x_train, y_train, x_val, y_val, x_test, y_test = split_data(x, y)
 
-    # print("--- input shape to model ---")
-    # print((sequence_length, x_train.shape[2]))
-
-    # model = 0
     model = create_lstm_model((sequence_length, x_train.shape[2]), y_train)
 
     # Train the model
@@ -214,12 +208,6 @@ def initialize_data_for_predictions():
     columns = prices.columns[1:] # without the date
 
     model = load_model('token_prices.keras')
-
-
-
-# if __name__ == "__main__":
-#     prepare_data_for_predictions()
-#     predict_prices()
 
 
 if __name__ == "__main__":
