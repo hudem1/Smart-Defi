@@ -11,20 +11,35 @@ import polars as pl
 import numpy as np
 from dotenv import find_dotenv, load_dotenv
 from giza.agents import AgentResult, GizaAgent
+from giza.agents.model import GizaModel
+
+from starknet_py.net.client_models import Call
+from starknet_py.hash.selector import get_selector_from_name
 
 # from addresses import ADDRESSES
 from ape.contracts.base import ContractInstance
 
-# from globals import model, last_data_sequence, scaler, last_date, columns
-
 from model.predict_tokens import predict_future_prices
 from model import predict_tokens
+
+from starknet_py.contract import Contract
+from starknet_py.net.account.account import Account
+from starknet_py.net.models import StarknetChainId
+from starknet_py.net.signer.stark_curve_signer import KeyPair
+from starknet_py.net.full_node_client import FullNodeClient
 
 load_dotenv(find_dotenv())
 
 PASSPHRASE = os.environ.get("H2_AA_3_PASSPHRASE")
-sepolia_rpc_url = os.environ.get("SEPOLIA_RPC_URL")
-local_rpc_url = "http://127.0.0.1:8545"
+SEPOLIA_RPC_URL = os.environ.get("SEPOLIA_RPC_URL")
+LOCAL_RPC_URL = "http://127.0.0.1:8545"
+
+SN_USER_ADDRESS = os.environ.get("SN_USER_ADDRESS")
+SN_PRIVATE_KEY = os.environ.get("SN_SEPOLIA_PRIV_KEY")
+SN_CONTRACT_ADDRESS = "0x039219276637883fe0c3177c6d310854bdcf2f502ab782ac73e3dc8664e91e69"
+
+NODE_URL = os.environ.get("SN_SEPOLIA_RPC_URL")
+sn_client = FullNodeClient(node_url=NODE_URL)
 
 token_mapping = {'DAI': 0, 'WETH': 1, 'WBTC': 2, 'USDC': 3, 'USDT': 4}
 
@@ -88,20 +103,25 @@ def preprocess_data(token_predictions, debt_token, debt_token_amount, collat_tok
 
 
 def create_agent(
-    agent_id: int, contracts: dict, chain: str, account: str
+    # agent_id: int, contracts: dict, chain: str, account: str
+    model_id: int, version_id: int
 ):
     """
     Create a Giza agent for the liquidation prediction model
     """
-    agent = GizaAgent.from_id(
-        id=agent_id,
-        # version_id=version_id,
-        contracts=contracts,
-        chain=chain,
-        account=account,
+    # agent = GizaAgent.from_id(
+    #     id=agent_id,
+    #     contracts=contracts,
+    #     chain=chain,
+    #     account=account,
+    # )
+
+    model = GizaModel(
+        id=model_id,
+        version=version_id
     )
 
-    return agent
+    return model
 
 
 def predict_liquidation(agent: GizaAgent, input: np.ndarray):
@@ -118,10 +138,11 @@ def predict_liquidation(agent: GizaAgent, input: np.ndarray):
     # if isinstance(date, np.ndarray):
     #     print("--- instance !! ---")
     # date = [[738818.]]
-    prediction = agent.predict(input_feed={"float_input": input}, verifiable=True, dry_run=True, model_category="XGB", job_size='S')
-    print(f"--- prediction: {prediction}")
+    (result, request_id) = agent.predict(input_feed={"float_input": input}, verifiable=True, dry_run=True, model_category="XGB", job_size='S')
+    print(f"--- prediction: {result}")
+
     # [1 1] [48419176448 0]
-    return prediction
+    return result
 
 
 def get_pred_val(prediction: AgentResult):
@@ -146,8 +167,6 @@ def overwrite_weird_prediction(predicted_debt_to_collat_ratios: pl.DataFrame):
 
     for i, col in enumerate(ratio_columns[::-1]):
         print(f"for col {col} : {predicted_debt_to_collat_ratios[col].item()}")
-        # 739199
-        # print(f"row's value: {predicted_debt_to_collat_ratios[col]}")
         if (predicted_debt_to_collat_ratios[col] >= liquidation_threshold).any():
             return (datetime.now() + timedelta(days=i + 1)).toordinal()
 
@@ -162,42 +181,27 @@ def overwrite_weird_prediction(predicted_debt_to_collat_ratios: pl.DataFrame):
 
     return 0
 
-# def postprocess_data(prediction):
-#     prediction
 
-#     return datetime.fromordinal(int(unscaled_ordinal)).strftime("%Y-%m-%d")
-
-
-
-def execute_agent(debt_token, debt_token_amount, collat_token, collat_token_amount):
+async def execute_agent(debt_token, debt_token_amount, collat_token, collat_token_amount):
     logger = getLogger("agent_logger")
 
     token_predictions = get_data(debt_token, collat_token)
     print(f"token_predictions: {token_predictions}")
-
-    # Get the minimum price_WETH
-    min_price_weth = token_predictions["price_WETH"].min()
-    # Filter the DataFrame to get the row with the minimum price_WETH
-    min_price_row = token_predictions.filter(pl.col("price_WETH") == min_price_weth)
-    print(f"--- minimum price row: {min_price_row}")
 
     predicted_debt_to_collat_ratios = preprocess_data(token_predictions, debt_token, debt_token_amount, collat_token, collat_token_amount)
     print(f"predicted_debt_to_collat_ratios: {predicted_debt_to_collat_ratios}")
 
     contracts = {
         "liquidation_prediction": "0x5110BEbECcE7ee99BB45073f71b6fbF46c4Aa75e", # sepolia
-        # "liquidation_prediction": "0x5FbDB2315678afecb367f032d93F642f64180aa3", # local
     }
 
-    # print(f"passphrase: {PASSPHRASE}")
-
-    agent = create_agent(
-        117,
-        contracts,
-        # f"ethereum:sepolia:geth",
-        f"ethereum:sepolia:{sepolia_rpc_url}",
-        "h2_aa_3"
-    )
+    # agent = create_agent(
+    #     117,
+    #     contracts,
+    #     # f"ethereum:sepolia:geth", # caused some limits to tx that can be sent
+    #     f"ethereum:sepolia:{SEPOLIA_RPC_URL}",
+    #     "h2_aa_3"
+    # )
 
     # print(agent.version)
     # print(agent.account) # h2_aa_3
@@ -211,42 +215,89 @@ def execute_agent(debt_token, debt_token_amount, collat_token, collat_token_amou
     # print(agent.framework) # CAIRO
     # print(agent.session) # None
 
+    agent = create_agent(model_id=926, version_id=2)
+
     prediction = predict_liquidation(agent, predicted_debt_to_collat_ratios.to_numpy().flatten())
 
     print(f"prediction: {prediction}")
 
-    predicted_date = get_pred_val(prediction)
+    # predicted_date = get_pred_val(prediction)
 
     predicted_date = overwrite_weird_prediction(predicted_debt_to_collat_ratios)
     print(f"--- predicted_date: {predicted_date}")
 
-    # predicted_liquidation_date = postprocess_data(scaled_prediction)
+    sn_account = Account(
+        address=SN_USER_ADDRESS,
+        client=sn_client,
+        key_pair=KeyPair.from_private_key(SN_PRIVATE_KEY),
+        chain=StarknetChainId.SEPOLIA,
+    )
 
-    # print(f"predicted_liquidation_date: {predicted_liquidation_date}")
+    sn_contract = await Contract.from_address(provider=sn_account, address=SN_CONTRACT_ADDRESS)
 
-    with agent.execute() as contracts:
-        global token_mapping
+    invocation = await sn_contract.functions["add_prediction"].invoke_v1(
+        debt_token={debt_token: None},
+        debt_amount=debt_token_amount,
+        collat_token={collat_token: None},
+        collat_amount=collat_token_amount,
+        predicted_liquidation_date=predicted_date,
+        max_fee=int(1e14)
+    )
+    print(f"--- calldata: {invocation.invoke_transaction.calldata} ---")
 
-        logger.info("Executing contract")
+    await invocation.wait_for_acceptance()
+    print(f"--- tx hash: {invocation.hash} ---")
 
-        # contracts.liquidation_prediction.setTestBool(False)
+    ### raw contract call ###
+    # call = Call(
+    #     to_addr=SN_CONTRACT_ADDRESS,
+    #     selector=get_selector_from_name("add_prediction"),
+    #     calldata=[
+    #         token_mapping[debt_token],
+    #         get_lower_128_bits(debt_token_amount),
+    #         get_higher_128_bits(debt_token_amount),
+    #         token_mapping[collat_token],
+    #         get_lower_128_bits(collat_token_amount),
+    #         get_higher_128_bits(collat_token_amount),
+    #         get_lower_128_bits(predicted_date),
+    #         get_higher_128_bits(predicted_date),
+    #     ],
+    # )
 
-        try:
-            contracts.liquidation_prediction.addPrediction(
-                # liquidity_pool,
-                token_mapping[debt_token],
-                debt_token_amount,
-                token_mapping[collat_token],
-                collat_token_amount,
-                predicted_date
-            )
-        except Exception as e:
-            print("--- Error ---")
-            print(f"Error Type: {type(e).__name__}")  # Get the type of the exception
-            print(f"Error Message: {str(e)}")  # Get the message of the exception
+    # await sn_account.client.call_contract(call)
+
+    invocation = await sn_contract.functions["set_test_bool"].invoke_v1(
+        value=True, max_fee=int(1e14)
+    )
+    await invocation.wait_for_acceptance()
+
+    ##### With agent interacting with Ethereum smart contract #####
+    # with agent.execute() as contracts:
+    #     global token_mapping
+    #     logger.info("Executing contract")
+    # try:
+    #     contracts.liquidation_prediction.setTestBool(True)
+    #     contracts.liquidation_prediction.addPrediction(
+    #         # liquidity_pool,
+    #         token_mapping[debt_token],
+    #         debt_token_amount,
+    #         token_mapping[collat_token],
+    #         collat_token_amount,
+    #         predicted_date
+    #     )
+    # except Exception as e:
+    #     print("--- Error ---")
+    #     print(f"Error Type: {type(e).__name__}")  # Get the type of the exception
+    #     print(f"Error Message: {str(e)}")  # Get the message of the exception
 
     return datetime.fromordinal(predicted_date).strftime("%Y-%m-%d")
 
+
+def get_lower_128_bits(x: int):
+    return x & ((1 << 128) - 1)
+
+def get_higher_128_bits(x: int):
+    return (x >> 128) & ((1 << 128) - 1)
 
 
 if __name__ == "__main__":
@@ -262,9 +313,6 @@ if __name__ == "__main__":
 
     MODEL_ID = args.model_id or 924
     VERSION_ID = args.version_id or 10
-
-    print(f"modelid: {MODEL_ID}")
-    print(f"versionid: {VERSION_ID}")
 
     execute_agent(MODEL_ID, VERSION_ID)
 

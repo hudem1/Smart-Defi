@@ -6,7 +6,6 @@ import numpy as np
 
 from agent.agent import execute_agent
 from model.predict_tokens import initialize_data_for_predictions
-# from globals import model, last_data_sequence, scaler, last_date, columns
 from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
@@ -60,7 +59,7 @@ async def predict_prices(data: PredictionRequest):
     print(data.collateralToken)
     print(data.collateralAmount)
 
-    predictedLiquidationDate = execute_agent(data.borrowToken, data.borrowAmount, data.collateralToken, data.collateralAmount)
+    predictedLiquidationDate = await execute_agent(data.borrowToken, data.borrowAmount, data.collateralToken, data.collateralAmount)
 
     return {
         "borrowToken": data.borrowToken,
